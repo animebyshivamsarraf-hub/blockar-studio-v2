@@ -1,15 +1,17 @@
 # BlockAR Studio v2
 
-A mobile-first AR construction studio with 3D building, hand tracking, and roller coaster creation.
+A mobile-first 3D construction studio being developed toward hand-controlled building, roller-coaster tracks, and real-world AR.
 
-## Current foundation
+## Current features
 
 - Responsive mobile-first dark interface.
 - Three.js 3D workspace with cube, sphere, and pyramid placement.
 - Touch-first Build, Move, and Delete modes.
 - Color selection, Undo/Redo, local Save/Load, and clear workspace.
-- Optional rear-camera preview with permission/error handling.
-- TypeScript + Vite production build.
+- Camera preview with permission/error handling.
+- MediaPipe Hand Landmarker integration: pinch thumb and index finger to place the selected object on the 3D floor.
+- GPU inference is attempted first, with a CPU fallback.
+- GitHub Actions build check and GitHub Pages deployment workflow.
 
 ## Run locally
 
@@ -27,14 +29,17 @@ npm run build
 npm run preview
 ```
 
-## Important status
+## Important limitations
 
-This is the clean v2 foundation. Camera preview is **not yet world-locked AR**, and hand tracking plus roller-coaster track construction are planned next. A production build and physical-device check must pass before calling the app fully verified.
+- Hand tracking requires camera permission, HTTPS (or localhost), and network access to load the MediaPipe model/WASM files.
+- The current camera view is a camera-backed 3D overlay, **not yet calibrated/world-locked AR**. Objects are placed on a virtual floor, not anchored to real surfaces.
+- Roller-coaster rails, physics, and ride preview are not implemented yet.
+- A GitHub Actions build and physical-device test must pass before calling the app verified.
 
 ## Roadmap
 
-1. Verify core 3D interactions and mobile touch behavior.
-2. Add MediaPipe hand tracking with a safe touch fallback.
-3. Add roller-coaster rails, curves, supports, and preview motion.
+1. Verify build and core interactions on a real phone.
+2. Improve stable hand selection and pinch placement.
+3. Add roller-coaster rails, curves, supports, and ride preview.
 4. Add WebXR hit testing for supported phones/browsers.
-5. Add automated build checks and deployment preview.
+5. Continue free GitHub Pages deployment and smoke tests.
