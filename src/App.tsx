@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 import * as THREE from "three";
 import { Camera, Hand, Box, Circle, Triangle, Undo2, Redo2, Trash2, Save, RotateCcw, Move3D, MousePointer2 } from "lucide-react";
 
@@ -86,7 +86,7 @@ export default function App() {
     snapshot(); const item={id:nextId.current++,shape,color,x:Math.round(x),z:Math.round(z)};
     setBlocks(prev=>[...prev,item]); setSelected(item.id); setHint("Block placed. Keep building!");
   };
-  const onStagePointer = (e: React.PointerEvent<HTMLDivElement>) => {
+  const onStagePointer = (e: PointerEvent<HTMLDivElement>) => {
     if(e.target !== e.currentTarget && !(e.target instanceof HTMLCanvasElement)) return;
     const scene=sceneRef.current,camera=cameraRef.current,renderer=rendererRef.current;
     if(!scene||!camera||!renderer)return;
