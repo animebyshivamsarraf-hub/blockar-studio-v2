@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import * as THREE from "three";
-import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
+import type { HandLandmarker } from "@mediapipe/tasks-vision";
 import { Camera, Hand, Box, Circle, Triangle, Undo2, Redo2, Trash2, Save, RotateCcw, Move3D, MousePointer2 } from "lucide-react";
 
 type Shape = "cube" | "sphere" | "pyramid";
@@ -210,6 +210,9 @@ export default function App() {
       if (sessionToken !== sessionTokenRef.current) return;
       setCameraOn(true);
       setHandStatus("LOADING HAND MODEL…");
+      // Load the comparatively large MediaPipe runtime only when hand tracking is requested.
+      const { FilesetResolver, HandLandmarker } = await import("@mediapipe/tasks-vision");
+      if (sessionToken !== sessionTokenRef.current) return;
       const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm");
       if (sessionToken !== sessionTokenRef.current) return;
       const modelOptions = {
