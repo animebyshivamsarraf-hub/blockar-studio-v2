@@ -190,8 +190,8 @@ export default function App() {
   };
 
   const toggleTracking = async () => {
-    if (trackingOn) { stopTracking(); setHint("Hand tracking stopped. Touch controls still work."); return; }
-    if (trackingStartingRef.current || cameraStartingRef.current) return;
+    if (trackingOn || trackingStartingRef.current) { stopTracking(); setHint("Camera and hand tracking stopped. Touch controls still work."); return; }
+    if (cameraStartingRef.current) return;
     trackingStartingRef.current = true;
     const sessionToken = ++sessionTokenRef.current;
     try {
@@ -275,7 +275,7 @@ export default function App() {
   };
 
   const toggleCamera = async () => {
-    if (cameraStartingRef.current) return;
+    if (cameraStartingRef.current) { stopTracking(); setHint("Camera startup cancelled. Touch controls still work."); return; }
     if (cameraOn) {
       if (trackingStartingRef.current) {
         stopTracking();
@@ -316,7 +316,7 @@ export default function App() {
   const load=()=>{try{const raw=localStorage.getItem("blockar-v2-scene");if(!raw){setHint("No saved scene found yet.");return;}const saved=JSON.parse(raw) as Placed[]|{blocks:Placed[];trackPoints?:TrackPoint[]};const parsed=Array.isArray(saved)?saved:saved.blocks;const savedTrack=Array.isArray(saved)?[]:(saved.trackPoints??[]);if(!Array.isArray(parsed)||!parsed.every(b=>Number.isFinite(b.id)&&["cube","sphere","pyramid"].includes(b.shape)&&Number.isFinite(b.x)&&Number.isFinite(b.z)&&typeof b.color==="string")||!Array.isArray(savedTrack)||!savedTrack.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.z)))throw new Error("Invalid scene");snapshot();setBlocks(parsed);setTrackPoints(savedTrack);nextId.current=Math.max(1,...parsed.map(b=>b.id+1));setHint("Scene and track loaded.");}catch{setHint("Saved scene could not be loaded.");}};
   const clear=()=>{if(!blocks.length&&!trackPoints.length)return;snapshot();setBlocks([]);setTrackPoints([]);setSelected(null);setHint("Workspace and coaster track cleared.");};
   return <main className="app-shell">
-    <header className="topbar"><div className="brand-mark"><Box size={22}/></div><div className="brand-copy"><strong>BlockAR <span>STUDIO</span></strong><small>BUILD YOUR WORLD</small></div><div className="top-spacer"/><div className="count-pill">{blocks.length} BLOCKS</div><button className={trackingOn?"icon-button active":"icon-button"} onClick={toggleTracking} disabled={trackingStartingRef.current || cameraStartingRef.current} aria-label={trackingOn?"Stop hand tracking":"Start hand tracking"}><Hand size={19}/></button><button className={cameraOn?"icon-button active":"icon-button"} onClick={toggleCamera} disabled={trackingStartingRef.current || cameraStartingRef.current} aria-label={cameraOn?"Turn camera off":"Turn camera on"}><Camera size={19}/></button></header>
+    <header className="topbar"><div className="brand-mark"><Box size={22}/></div><div className="brand-copy"><strong>BlockAR <span>STUDIO</span></strong><small>BUILD YOUR WORLD</small></div><div className="top-spacer"/><div className="count-pill">{blocks.length} BLOCKS</div><button className={trackingOn?"icon-button active":"icon-button"} onClick={toggleTracking} aria-label={trackingOn?"Stop hand tracking":"Start hand tracking"}><Hand size={19}/></button><button className={cameraOn?"icon-button active":"icon-button"} onClick={toggleCamera} aria-label={cameraOn?"Turn camera off":"Turn camera on"}><Camera size={19}/></button></header>
     <section className="workspace"><video ref={videoRef} className={cameraOn?"camera-feed visible":"camera-feed"} playsInline muted autoPlay/><div ref={stageRef} className="three-stage" onPointerDown={onStagePointer}/><div className="scene-badge"><span className="live-dot"/>{trackingOn?handStatus:cameraOn?"CAMERA LIVE":"3D WORKSPACE"} <span className="separator">/</span> {trackingOn?"PINCH TO PLACE":"TOUCH BUILD"}</div>
       {cameraError&&<div className="error-banner">{cameraError}</div>}
       <div className="hint-card"><MousePointer2 size={16}/><span>{hint}</span></div>
