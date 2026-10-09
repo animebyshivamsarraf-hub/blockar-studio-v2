@@ -6,6 +6,7 @@ import { Camera, Hand, Box, Circle, Triangle, Undo2, Redo2, Trash2, Save, Rotate
 type Shape = "cube" | "sphere" | "pyramid";
 type Placed = { id: number; shape: Shape; color: string; x: number; z: number };
 type TrackPoint = { x: number; z: number };
+type SceneSnapshot = { blocks: Placed[]; trackPoints: TrackPoint[] };
 const palette = ["#60a5fa", "#fb7185", "#fbbf24", "#34d399", "#c084fc", "#f8fafc"];
 
 export default function App() {
@@ -32,8 +33,8 @@ export default function App() {
   const [trackMode, setTrackMode] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [hint, setHint] = useState("Tap the grid to place your first block.");
-  const history = useRef<Placed[][]>([]);
-  const future = useRef<Placed[][]>([]);
+  const history = useRef<SceneSnapshot[]>([]);
+  const future = useRef<SceneSnapshot[]>([]);
   const nextId = useRef(1);
 
   useEffect(() => {
@@ -137,8 +138,14 @@ export default function App() {
     };
   }, [trackPoints]);
 
-  const snapshot = () => { history.current.push(blocks.map(b => ({...b}))); if(history.current.length>40) history.current.shift(); future.current=[]; };
+  const snapshot = () => { history.current.push({ blocks: blocks.map(b => ({...b})), trackPoints: trackPoints.map(p => ({...p})) }); if(history.current.length>40) history.current.shift(); future.current=[]; };
   const placeAt = (x: number, z: number) => {
+    if (trackMode) {
+      snapshot();
+      setTrackPoints(prev => [...prev, { x: Math.round(x), z: Math.round(z) }]);
+      setHint("Coaster point added. Tap another grid point to extend the rail.");
+      return;
+    }
     if (mode === "delete" || mode === "move") {
       const nearest = blocks.filter(b => Math.hypot(b.x-x,b.z-z)<0.9).sort((a,b)=>Math.hypot(a.x-x,a.z-z)-Math.hypot(b.x-x,b.z-z))[0];
       if (!nearest) { setHint(mode === "delete" ? "Tap near a block to delete it." : "Tap near a block to select it."); return; }
@@ -256,11 +263,11 @@ export default function App() {
     } catch(err) {setCameraError(err instanceof Error?err.message:"Camera permission was denied.");setCameraOn(false);}
   };
   useEffect(() => () => { cancelAnimationFrame(trackingRafRef.current); handLandmarkerRef.current?.close(); const stream=videoRef.current?.srcObject as MediaStream|null; stream?.getTracks().forEach(t=>t.stop()); }, []);
-  const undo=()=>{if(!history.current.length)return;future.current.push(blocks.map(b=>({...b})));setBlocks(history.current.pop()!);setHint("Undo complete.");};
-  const redo=()=>{if(!future.current.length)return;history.current.push(blocks.map(b=>({...b})));setBlocks(future.current.pop()!);setHint("Redo complete.");};
+  const undo=()=>{if(!history.current.length)return;future.current.push({blocks:blocks.map(b=>({...b})),trackPoints:trackPoints.map(p=>({...p}))});const previous=history.current.pop()!;setBlocks(previous.blocks);setTrackPoints(previous.trackPoints);setSelected(null);setHint("Undo complete.");};
+  const redo=()=>{if(!future.current.length)return;history.current.push({blocks:blocks.map(b=>({...b})),trackPoints:trackPoints.map(p=>({...p}))});const next=future.current.pop()!;setBlocks(next.blocks);setTrackPoints(next.trackPoints);setSelected(null);setHint("Redo complete.");};
   const save=()=>{try{localStorage.setItem("blockar-v2-scene",JSON.stringify({blocks,trackPoints}));setHint("Scene and coaster track saved on this device.");}catch{setHint("Could not save scene on this device.");}};
   const load=()=>{try{const raw=localStorage.getItem("blockar-v2-scene");if(!raw){setHint("No saved scene found yet.");return;}const saved=JSON.parse(raw) as Placed[]|{blocks:Placed[];trackPoints?:TrackPoint[]};const parsed=Array.isArray(saved)?saved:saved.blocks;const savedTrack=Array.isArray(saved)?[]:(saved.trackPoints??[]);if(!Array.isArray(parsed)||!parsed.every(b=>Number.isFinite(b.id)&&["cube","sphere","pyramid"].includes(b.shape)&&Number.isFinite(b.x)&&Number.isFinite(b.z)&&typeof b.color==="string")||!Array.isArray(savedTrack)||!savedTrack.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.z)))throw new Error("Invalid scene");snapshot();setBlocks(parsed);setTrackPoints(savedTrack);nextId.current=Math.max(1,...parsed.map(b=>b.id+1));setHint("Scene and track loaded.");}catch{setHint("Saved scene could not be loaded.");}};
-  const clear=()=>{if(!blocks.length&&!trackPoints.length)return;if(blocks.length)snapshot();setBlocks([]);setTrackPoints([]);setSelected(null);setHint("Workspace and coaster track cleared.");};
+  const clear=()=>{if(!blocks.length&&!trackPoints.length)return;snapshot();setBlocks([]);setTrackPoints([]);setSelected(null);setHint("Workspace and coaster track cleared.");};
   return <main className="app-shell">
     <header className="topbar"><div className="brand-mark"><Box size={22}/></div><div className="brand-copy"><strong>BlockAR <span>STUDIO</span></strong><small>BUILD YOUR WORLD</small></div><div className="top-spacer"/><div className="count-pill">{blocks.length} BLOCKS</div><button className={trackingOn?"icon-button active":"icon-button"} onClick={toggleTracking} aria-label={trackingOn?"Stop hand tracking":"Start hand tracking"}><Hand size={19}/></button><button className={cameraOn?"icon-button active":"icon-button"} onClick={toggleCamera} aria-label={cameraOn?"Turn camera off":"Turn camera on"}><Camera size={19}/></button></header>
     <section className="workspace"><video ref={videoRef} className={cameraOn?"camera-feed visible":"camera-feed"} playsInline muted autoPlay/><div ref={stageRef} className="three-stage" onPointerDown={onStagePointer}/><div className="scene-badge"><span className="live-dot"/>{trackingOn?handStatus:cameraOn?"CAMERA LIVE":"3D WORKSPACE"} <span className="separator">/</span> {trackingOn?"PINCH TO PLACE":"TOUCH BUILD"}</div>
