@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import * as THREE from "three";
+import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
 import { Camera, Hand, Box, Circle, Triangle, Undo2, Redo2, Trash2, Save, RotateCcw, Move3D, MousePointer2 } from "lucide-react";
 
 type Shape = "cube" | "sphere" | "pyramid";
@@ -13,6 +14,12 @@ export default function App() {
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const objectsRef = useRef(new Map<number, THREE.Object3D>());
+  const handLandmarkerRef = useRef<HandLandmarker | null>(null);
+  const trackingRafRef = useRef<number>(0);
+  const wasPinchingRef = useRef(false);
+  const placeAtRef = useRef<(x:number,z:number)=>void>(()=>{});
+  const [trackingOn, setTrackingOn] = useState(false);
+  const [handStatus, setHandStatus] = useState("HAND TRACKING OFF");
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [shape, setShape] = useState<Shape>("cube");
@@ -86,6 +93,7 @@ export default function App() {
     snapshot(); const item={id:nextId.current++,shape,color,x:Math.round(x),z:Math.round(z)};
     setBlocks(prev=>[...prev,item]); setSelected(item.id); setHint("Block placed. Keep building!");
   };
+  placeAtRef.current = placeAt;
   const onStagePointer = (e: PointerEvent<HTMLDivElement>) => {
     if(e.target !== e.currentTarget && !(e.target instanceof HTMLCanvasElement)) return;
     const scene=sceneRef.current,camera=cameraRef.current,renderer=rendererRef.current;
@@ -97,6 +105,84 @@ export default function App() {
     const hits=raycaster.intersectObject(floor); if(!hits.length)return;
     const p=hits[0].point; placeAt(p.x,p.z);
   };
+  const stopTracking = () => {
+    cancelAnimationFrame(trackingRafRef.current);
+    handLandmarkerRef.current?.close();
+    handLandmarkerRef.current = null;
+    wasPinchingRef.current = false;
+    setTrackingOn(false);
+    setHandStatus("HAND TRACKING OFF");
+    const stream = videoRef.current?.srcObject as MediaStream | null;
+    stream?.getTracks().forEach(track => track.stop());
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraOn(false);
+  };
+
+  const toggleTracking = async () => {
+    if (trackingOn) { stopTracking(); setHint("Hand tracking stopped. Touch controls still work."); return; }
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera needs HTTPS and browser permission.");
+      setHandStatus("STARTING CAMERA…");
+      const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:640},height:{ideal:480}},audio:false});
+      const video = videoRef.current;
+      if (!video) throw new Error("Camera preview is unavailable.");
+      video.srcObject = stream;
+      await video.play();
+      setCameraOn(true);
+      setHandStatus("LOADING HAND MODEL…");
+      const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm");
+      const landmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate: "GPU" },
+        runningMode: "VIDEO", numHands: 1
+      });
+      handLandmarkerRef.current = landmarker;
+      setTrackingOn(true);
+      setCameraError("");
+      setHandStatus("SHOW YOUR HAND");
+      setHint("Pinch your thumb and index finger to place the selected block.");
+      let lastVideoTime = -1;
+      const detect = () => {
+        trackingRafRef.current = requestAnimationFrame(detect);
+        const v = videoRef.current;
+        const detector = handLandmarkerRef.current;
+        if (!v || !detector || v.readyState < 2 || v.currentTime === lastVideoTime) return;
+        lastVideoTime = v.currentTime;
+        try {
+          const result = detector.detectForVideo(v, performance.now());
+          const hand = result.landmarks?.[0];
+          if (!hand) { setHandStatus("HAND NOT FOUND"); wasPinchingRef.current = false; return; }
+          const thumb = hand[4], index = hand[8];
+          const pinchDistance = Math.hypot(thumb.x-index.x, thumb.y-index.y);
+          const pinching = pinchDistance < 0.055;
+          setHandStatus(pinching ? "PINCH DETECTED" : "HAND TRACKED");
+          if (pinching && !wasPinchingRef.current) {
+            const scene = sceneRef.current, camera = cameraRef.current;
+            if (scene && camera) {
+              const raycaster = new THREE.Raycaster();
+              raycaster.setFromCamera(new THREE.Vector2((1-index.x)*2-1, -(index.y*2-1)), camera);
+              const floor = scene.getObjectByName("floor");
+              const hits = floor ? raycaster.intersectObject(floor) : [];
+              if (hits.length) placeAtRef.current(hits[0].point.x, hits[0].point.z);
+            }
+          }
+          wasPinchingRef.current = pinching;
+        } catch {
+          setHandStatus("TRACKING RETRYING");
+        }
+      };
+      detect();
+    } catch(err) {
+      const message = err instanceof Error ? err.message : "Could not start hand tracking.";
+      setCameraError(message + " You can still build with touch controls.");
+      setHandStatus("TRACKING UNAVAILABLE");
+      const stream = videoRef.current?.srcObject as MediaStream | null;
+      stream?.getTracks().forEach(track => track.stop());
+      if (videoRef.current) videoRef.current.srcObject = null;
+      setCameraOn(false);
+      setTrackingOn(false);
+    }
+  };
+
   const toggleCamera = async () => {
     if(cameraOn) { const stream=videoRef.current?.srcObject as MediaStream|null; stream?.getTracks().forEach(t=>t.stop()); if(videoRef.current)videoRef.current.srcObject=null; setCameraOn(false); setCameraError(""); return; }
     try {
@@ -106,19 +192,20 @@ export default function App() {
       setCameraOn(true);setCameraError("");setHint("Camera ready. Tap the grid to place blocks.");
     } catch(err) {setCameraError(err instanceof Error?err.message:"Camera permission was denied.");setCameraOn(false);}
   };
+  useEffect(() => () => { cancelAnimationFrame(trackingRafRef.current); handLandmarkerRef.current?.close(); const stream=videoRef.current?.srcObject as MediaStream|null; stream?.getTracks().forEach(t=>t.stop()); }, []);
   const undo=()=>{if(!history.current.length)return;future.current.push(blocks.map(b=>({...b})));setBlocks(history.current.pop()!);setHint("Undo complete.");};
   const redo=()=>{if(!future.current.length)return;history.current.push(blocks.map(b=>({...b})));setBlocks(future.current.pop()!);setHint("Redo complete.");};
   const save=()=>{try{localStorage.setItem("blockar-v2-scene",JSON.stringify(blocks));setHint("Scene saved on this device.");}catch{setHint("Could not save scene on this device.");}};
   const load=()=>{try{const raw=localStorage.getItem("blockar-v2-scene");if(!raw){setHint("No saved scene found yet.");return;}const parsed=JSON.parse(raw) as Placed[];if(!Array.isArray(parsed)||!parsed.every(b=>Number.isFinite(b.id)&&["cube","sphere","pyramid"].includes(b.shape)&&Number.isFinite(b.x)&&Number.isFinite(b.z)&&typeof b.color==="string"))throw new Error("Invalid scene");snapshot();setBlocks(parsed);nextId.current=Math.max(1,...parsed.map(b=>b.id+1));setHint("Scene loaded.");}catch{setHint("Saved scene could not be loaded.");}};
   const clear=()=>{if(!blocks.length)return;snapshot();setBlocks([]);setSelected(null);setHint("Workspace cleared.");};
   return <main className="app-shell">
-    <header className="topbar"><div className="brand-mark"><Box size={22}/></div><div className="brand-copy"><strong>BlockAR <span>STUDIO</span></strong><small>BUILD YOUR WORLD</small></div><div className="top-spacer"/><div className="count-pill">{blocks.length} BLOCKS</div><button className={cameraOn?"icon-button active":"icon-button"} onClick={toggleCamera} aria-label={cameraOn?"Turn camera off":"Turn camera on"}><Camera size={19}/></button></header>
-    <section className="workspace"><video ref={videoRef} className={cameraOn?"camera-feed visible":"camera-feed"} playsInline muted autoPlay/><div ref={stageRef} className="three-stage" onPointerDown={onStagePointer}/><div className="scene-badge"><span className="live-dot"/>{cameraOn?"CAMERA LIVE":"3D WORKSPACE"} <span className="separator">/</span> TOUCH BUILD</div>
+    <header className="topbar"><div className="brand-mark"><Box size={22}/></div><div className="brand-copy"><strong>BlockAR <span>STUDIO</span></strong><small>BUILD YOUR WORLD</small></div><div className="top-spacer"/><div className="count-pill">{blocks.length} BLOCKS</div><button className={trackingOn?"icon-button active":"icon-button"} onClick={toggleTracking} aria-label={trackingOn?"Stop hand tracking":"Start hand tracking"}><Hand size={19}/></button><button className={cameraOn?"icon-button active":"icon-button"} onClick={toggleCamera} aria-label={cameraOn?"Turn camera off":"Turn camera on"}><Camera size={19}/></button></header>
+    <section className="workspace"><video ref={videoRef} className={cameraOn?"camera-feed visible":"camera-feed"} playsInline muted autoPlay/><div ref={stageRef} className="three-stage" onPointerDown={onStagePointer}/><div className="scene-badge"><span className="live-dot"/>{trackingOn?handStatus:cameraOn?"CAMERA LIVE":"3D WORKSPACE"} <span className="separator">/</span> {trackingOn?"PINCH TO PLACE":"TOUCH BUILD"}</div>
       {cameraError&&<div className="error-banner">{cameraError}</div>}
       <div className="hint-card"><MousePointer2 size={16}/><span>{hint}</span></div>
       <div className="workspace-actions"><button onClick={undo} disabled={!history.current.length} aria-label="Undo"><Undo2/></button><button onClick={redo} disabled={!future.current.length} aria-label="Redo"><Redo2/></button><button onClick={save} aria-label="Save scene"><Save/></button><button onClick={load} aria-label="Load scene"><RotateCcw/></button><button onClick={clear} aria-label="Clear workspace"><Trash2/></button></div>
       <div className="mode-switch">{(["build","move","delete"] as const).map(m=><button key={m} className={mode===m?"mode active":"mode"} onClick={()=>{setMode(m);setHint(m==="build"?"Tap the grid to place a block.":m==="move"?"Tap near a block to move it.":"Tap near a block to delete it.");}}>{m}</button>)}</div>
     </section>
-    <section className="tool-dock"><div className="dock-heading"><span>OBJECT</span><span className="dock-sub">TAP TO SELECT</span></div><div className="shape-row"><button className={shape==="cube"?"shape active":"shape"} onClick={()=>setShape("cube")}><Box/><span>Cube</span></button><button className={shape==="sphere"?"shape active":"shape"} onClick={()=>setShape("sphere")}><Circle/><span>Sphere</span></button><button className={shape==="pyramid"?"shape active":"shape"} onClick={()=>setShape("pyramid")}><Triangle/><span>Pyramid</span></button></div><div className="dock-heading palette-heading"><span>COLOR</span><span className="dock-sub">MATERIAL</span></div><div className="palette-row">{palette.map(c=><button key={c} className={color===c?"swatch active":"swatch"} style={{background:c}} onClick={()=>setColor(c)} aria-label={"Select color "+c}/>)}</div><button className="primary-build" onClick={()=>{setMode("build");setHint("Tap anywhere on the grid to place a "+shape+".");}}><Move3D size={18}/> BUILD {shape.toUpperCase()} <span>↗</span></button><p className="footnote"><Hand size={14}/> Touch controls ready · Hand tracking coming next</p></section>
+    <section className="tool-dock"><div className="dock-heading"><span>OBJECT</span><span className="dock-sub">TAP TO SELECT</span></div><div className="shape-row"><button className={shape==="cube"?"shape active":"shape"} onClick={()=>setShape("cube")}><Box/><span>Cube</span></button><button className={shape==="sphere"?"shape active":"shape"} onClick={()=>setShape("sphere")}><Circle/><span>Sphere</span></button><button className={shape==="pyramid"?"shape active":"shape"} onClick={()=>setShape("pyramid")}><Triangle/><span>Pyramid</span></button></div><div className="dock-heading palette-heading"><span>COLOR</span><span className="dock-sub">MATERIAL</span></div><div className="palette-row">{palette.map(c=><button key={c} className={color===c?"swatch active":"swatch"} style={{background:c}} onClick={()=>setColor(c)} aria-label={"Select color "+c}/>)}</div><button className="primary-build" onClick={()=>{setMode("build");setHint("Tap anywhere on the grid to place a "+shape+".");}}><Move3D size={18}/> BUILD {shape.toUpperCase()} <span>↗</span></button><p className="footnote"><Hand size={14}/> Touch controls ready · Pinch to place when tracking is on</p></section>
   </main>;
 }
