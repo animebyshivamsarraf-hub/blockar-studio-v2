@@ -72,7 +72,7 @@ export default function App() {
 
   useEffect(() => {
     const scene = sceneRef.current; if (!scene) return;
-    for (const obj of objectsRef.current.values()) { scene.remove(obj); obj.traverse(n => { if (n instanceof THREE.Mesh) { n.geometry.dispose(); const m=n.material; if(Array.isArray(m)) m.forEach(x=>x.dispose()); else m.dispose(); } }); }
+    for (const obj of objectsRef.current.values()) { scene.remove(obj); obj.traverse(n => { if (n instanceof THREE.Mesh || n instanceof THREE.LineSegments) { n.geometry.dispose(); const m=n.material; if(Array.isArray(m)) m.forEach(x=>x.dispose()); else m.dispose(); } }); }
     objectsRef.current.clear();
     for (const block of blocks) {
       let geometry: THREE.BufferGeometry;
@@ -223,7 +223,7 @@ export default function App() {
           if (!hand) { setHandStatus("HAND NOT FOUND"); wasPinchingRef.current = false; return; }
           const thumb = hand[4], index = hand[8];
           const pinchDistance = Math.hypot(thumb.x-index.x, thumb.y-index.y);
-          const pinching = pinchDistance < 0.055;
+          const pinching = wasPinchingRef.current ? pinchDistance < 0.075 : pinchDistance < 0.05;
           setHandStatus(pinching ? "PINCH DETECTED" : "HAND TRACKED");
           if (pinching && !wasPinchingRef.current) {
             const scene = sceneRef.current, camera = cameraRef.current;
