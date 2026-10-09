@@ -238,7 +238,7 @@ export default function App() {
         try {
           const result = detector.detectForVideo(v, performance.now());
           const hand = result.landmarks?.[0];
-          if (!hand) { setHandStatus("HAND NOT FOUND"); wasPinchingRef.current = false; return; }
+          if (!hand) { setHandStatus("HAND NOT FOUND"); return; }
           const thumb = hand[4], index = hand[8];
           const pinchDistance = Math.hypot(thumb.x-index.x, thumb.y-index.y);
           const pinching = wasPinchingRef.current ? pinchDistance < 0.075 : pinchDistance < 0.05;
@@ -275,6 +275,13 @@ export default function App() {
   };
 
   const toggleCamera = async () => {
+    // Hand tracking may still be loading before cameraOn becomes true; cancel that session first.
+    if (trackingStartingRef.current) {
+      stopTracking();
+      setCameraError("");
+      setHint("Camera and hand tracking startup cancelled. Touch controls still work.");
+      return;
+    }
     if (cameraStartingRef.current) { stopTracking(); setHint("Camera startup cancelled. Touch controls still work."); return; }
     if (cameraOn) {
       if (trackingStartingRef.current) {
