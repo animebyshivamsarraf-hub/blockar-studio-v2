@@ -20,6 +20,9 @@ export default function App() {
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
   const trackingRafRef = useRef<number>(0);
   const wasPinchingRef = useRef(false);
+  const trackingStartingRef = useRef(false);
+  const cameraStartingRef = useRef(false);
+  const sessionTokenRef = useRef(0);
   const placeAtRef = useRef<(x:number,z:number)=>void>(()=>{});
   const [trackingOn, setTrackingOn] = useState(false);
   const [handStatus, setHandStatus] = useState("HAND TRACKING OFF");
@@ -170,6 +173,10 @@ export default function App() {
     const p=hits[0].point; placeAt(p.x,p.z);
   };
   const stopTracking = () => {
+    // Invalidate any camera/model startup that is still awaiting an async operation.
+    sessionTokenRef.current += 1;
+    trackingStartingRef.current = false;
+    cameraStartingRef.current = false;
     cancelAnimationFrame(trackingRafRef.current);
     handLandmarkerRef.current?.close();
     handLandmarkerRef.current = null;
@@ -184,6 +191,9 @@ export default function App() {
 
   const toggleTracking = async () => {
     if (trackingOn) { stopTracking(); setHint("Hand tracking stopped. Touch controls still work."); return; }
+    if (trackingStartingRef.current || cameraStartingRef.current) return;
+    trackingStartingRef.current = true;
+    const sessionToken = ++sessionTokenRef.current;
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera needs HTTPS and browser permission.");
       setHandStatus("STARTING CAMERA…");
@@ -193,12 +203,15 @@ export default function App() {
       let stream = video.srcObject as MediaStream | null;
       if (!stream || stream.getTracks().every(track => track.readyState !== "live")) {
         stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:640},height:{ideal:480}},audio:false});
+        if (sessionToken !== sessionTokenRef.current) { stream.getTracks().forEach(track => track.stop()); return; }
         video.srcObject = stream;
       }
       await video.play();
+      if (sessionToken !== sessionTokenRef.current) return;
       setCameraOn(true);
       setHandStatus("LOADING HAND MODEL…");
       const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm");
+      if (sessionToken !== sessionTokenRef.current) return;
       const modelOptions = {
         baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task" },
         runningMode: "VIDEO" as const, numHands: 1
@@ -209,6 +222,7 @@ export default function App() {
       } catch {
         landmarker = await HandLandmarker.createFromOptions(vision, modelOptions);
       }
+      if (sessionToken !== sessionTokenRef.current) { landmarker.close(); return; }
       handLandmarkerRef.current = landmarker;
       setTrackingOn(true);
       setCameraError("");
@@ -246,6 +260,7 @@ export default function App() {
       };
       detect();
     } catch(err) {
+      if (sessionToken !== sessionTokenRef.current) return;
       const message = err instanceof Error ? err.message : "Could not start hand tracking.";
       setCameraError(message + " You can still build with touch controls.");
       setHandStatus("TRACKING UNAVAILABLE");
@@ -254,11 +269,20 @@ export default function App() {
       if (videoRef.current) videoRef.current.srcObject = null;
       setCameraOn(false);
       setTrackingOn(false);
+    } finally {
+      if (sessionToken === sessionTokenRef.current) trackingStartingRef.current = false;
     }
   };
 
   const toggleCamera = async () => {
+    if (cameraStartingRef.current) return;
     if (cameraOn) {
+      if (trackingStartingRef.current) {
+        stopTracking();
+        setCameraError("");
+        setHint("Camera and hand tracking stopped. Touch controls still work.");
+        return;
+      }
       // The tracking session owns the stream while it is active; stop the whole session together.
       if (trackingOn) {
         stopTracking();
@@ -273,12 +297,17 @@ export default function App() {
       setCameraError("");
       return;
     }
+    cameraStartingRef.current = true;
+    const sessionToken = ++sessionTokenRef.current;
     try {
       if(!navigator.mediaDevices?.getUserMedia) throw new Error("Camera API unavailable. Open this app on HTTPS.");
       const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}},audio:false});
+      if (sessionToken !== sessionTokenRef.current) { stream.getTracks().forEach(track => track.stop()); return; }
       if(videoRef.current){videoRef.current.srcObject=stream; await videoRef.current.play();}
+      if (sessionToken !== sessionTokenRef.current) { stream.getTracks().forEach(track => track.stop()); return; }
       setCameraOn(true);setCameraError("");setHint("Camera ready. Tap the grid to place blocks.");
-    } catch(err) {setCameraError(err instanceof Error?err.message:"Camera permission was denied.");setCameraOn(false);}
+    } catch(err) { if (sessionToken === sessionTokenRef.current) { setCameraError(err instanceof Error?err.message:"Camera permission was denied.");setCameraOn(false); } }
+    finally { if (sessionToken === sessionTokenRef.current) cameraStartingRef.current = false; }
   };
   useEffect(() => () => { cancelAnimationFrame(trackingRafRef.current); handLandmarkerRef.current?.close(); const stream=videoRef.current?.srcObject as MediaStream|null; stream?.getTracks().forEach(t=>t.stop()); }, []);
   const undo=()=>{if(!history.current.length)return;future.current.push({blocks:blocks.map(b=>({...b})),trackPoints:trackPoints.map(p=>({...p}))});const previous=history.current.pop()!;setBlocks(previous.blocks);setTrackPoints(previous.trackPoints);setSelected(null);setHint("Undo complete.");};
@@ -287,7 +316,7 @@ export default function App() {
   const load=()=>{try{const raw=localStorage.getItem("blockar-v2-scene");if(!raw){setHint("No saved scene found yet.");return;}const saved=JSON.parse(raw) as Placed[]|{blocks:Placed[];trackPoints?:TrackPoint[]};const parsed=Array.isArray(saved)?saved:saved.blocks;const savedTrack=Array.isArray(saved)?[]:(saved.trackPoints??[]);if(!Array.isArray(parsed)||!parsed.every(b=>Number.isFinite(b.id)&&["cube","sphere","pyramid"].includes(b.shape)&&Number.isFinite(b.x)&&Number.isFinite(b.z)&&typeof b.color==="string")||!Array.isArray(savedTrack)||!savedTrack.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.z)))throw new Error("Invalid scene");snapshot();setBlocks(parsed);setTrackPoints(savedTrack);nextId.current=Math.max(1,...parsed.map(b=>b.id+1));setHint("Scene and track loaded.");}catch{setHint("Saved scene could not be loaded.");}};
   const clear=()=>{if(!blocks.length&&!trackPoints.length)return;snapshot();setBlocks([]);setTrackPoints([]);setSelected(null);setHint("Workspace and coaster track cleared.");};
   return <main className="app-shell">
-    <header className="topbar"><div className="brand-mark"><Box size={22}/></div><div className="brand-copy"><strong>BlockAR <span>STUDIO</span></strong><small>BUILD YOUR WORLD</small></div><div className="top-spacer"/><div className="count-pill">{blocks.length} BLOCKS</div><button className={trackingOn?"icon-button active":"icon-button"} onClick={toggleTracking} aria-label={trackingOn?"Stop hand tracking":"Start hand tracking"}><Hand size={19}/></button><button className={cameraOn?"icon-button active":"icon-button"} onClick={toggleCamera} aria-label={cameraOn?"Turn camera off":"Turn camera on"}><Camera size={19}/></button></header>
+    <header className="topbar"><div className="brand-mark"><Box size={22}/></div><div className="brand-copy"><strong>BlockAR <span>STUDIO</span></strong><small>BUILD YOUR WORLD</small></div><div className="top-spacer"/><div className="count-pill">{blocks.length} BLOCKS</div><button className={trackingOn?"icon-button active":"icon-button"} onClick={toggleTracking} disabled={trackingStartingRef.current || cameraStartingRef.current} aria-label={trackingOn?"Stop hand tracking":"Start hand tracking"}><Hand size={19}/></button><button className={cameraOn?"icon-button active":"icon-button"} onClick={toggleCamera} disabled={trackingStartingRef.current || cameraStartingRef.current} aria-label={cameraOn?"Turn camera off":"Turn camera on"}><Camera size={19}/></button></header>
     <section className="workspace"><video ref={videoRef} className={cameraOn?"camera-feed visible":"camera-feed"} playsInline muted autoPlay/><div ref={stageRef} className="three-stage" onPointerDown={onStagePointer}/><div className="scene-badge"><span className="live-dot"/>{trackingOn?handStatus:cameraOn?"CAMERA LIVE":"3D WORKSPACE"} <span className="separator">/</span> {trackingOn?"PINCH TO PLACE":"TOUCH BUILD"}</div>
       {cameraError&&<div className="error-banner">{cameraError}</div>}
       <div className="hint-card"><MousePointer2 size={16}/><span>{hint}</span></div>
