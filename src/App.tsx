@@ -187,10 +187,14 @@ export default function App() {
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera needs HTTPS and browser permission.");
       setHandStatus("STARTING CAMERA…");
-      const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:640},height:{ideal:480}},audio:false});
       const video = videoRef.current;
       if (!video) throw new Error("Camera preview is unavailable.");
-      video.srcObject = stream;
+      // Reuse an already-open preview stream instead of requesting the camera twice.
+      let stream = video.srcObject as MediaStream | null;
+      if (!stream || stream.getTracks().every(track => track.readyState !== "live")) {
+        stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:640},height:{ideal:480}},audio:false});
+        video.srcObject = stream;
+      }
       await video.play();
       setCameraOn(true);
       setHandStatus("LOADING HAND MODEL…");
@@ -254,7 +258,21 @@ export default function App() {
   };
 
   const toggleCamera = async () => {
-    if(cameraOn) { const stream=videoRef.current?.srcObject as MediaStream|null; stream?.getTracks().forEach(t=>t.stop()); if(videoRef.current)videoRef.current.srcObject=null; setCameraOn(false); setCameraError(""); return; }
+    if (cameraOn) {
+      // The tracking session owns the stream while it is active; stop the whole session together.
+      if (trackingOn) {
+        stopTracking();
+        setCameraError("");
+        setHint("Camera and hand tracking stopped. Touch controls still work.");
+        return;
+      }
+      const stream = videoRef.current?.srcObject as MediaStream | null;
+      stream?.getTracks().forEach(track => track.stop());
+      if (videoRef.current) videoRef.current.srcObject = null;
+      setCameraOn(false);
+      setCameraError("");
+      return;
+    }
     try {
       if(!navigator.mediaDevices?.getUserMedia) throw new Error("Camera API unavailable. Open this app on HTTPS.");
       const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}},audio:false});
