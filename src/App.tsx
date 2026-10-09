@@ -5,6 +5,7 @@ import { Camera, Hand, Box, Circle, Triangle, Undo2, Redo2, Trash2, Save, Rotate
 
 type Shape = "cube" | "sphere" | "pyramid";
 type Placed = { id: number; shape: Shape; color: string; x: number; z: number };
+type TrackPoint = { x: number; z: number };
 const palette = ["#60a5fa", "#fb7185", "#fbbf24", "#34d399", "#c084fc", "#f8fafc"];
 
 export default function App() {
@@ -14,6 +15,7 @@ export default function App() {
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const objectsRef = useRef(new Map<number, THREE.Object3D>());
+  const trackObjectsRef = useRef<THREE.Object3D[]>([]);
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
   const trackingRafRef = useRef<number>(0);
   const wasPinchingRef = useRef(false);
@@ -26,6 +28,8 @@ export default function App() {
   const [color, setColor] = useState(palette[0]);
   const [mode, setMode] = useState<"build" | "move" | "delete">("build");
   const [blocks, setBlocks] = useState<Placed[]>([]);
+  const [trackPoints, setTrackPoints] = useState<TrackPoint[]>([]);
+  const [trackMode, setTrackMode] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [hint, setHint] = useState("Tap the grid to place your first block.");
   const history = useRef<Placed[][]>([]);
@@ -80,6 +84,58 @@ export default function App() {
       scene.add(mesh); objectsRef.current.set(block.id, mesh);
     }
   }, [blocks, selected]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    for (const obj of trackObjectsRef.current) {
+      scene.remove(obj);
+      obj.traverse(node => {
+        if (node instanceof THREE.Mesh) {
+          node.geometry.dispose();
+          const material = node.material;
+          if (Array.isArray(material)) material.forEach(item => item.dispose());
+          else material.dispose();
+        }
+      });
+    }
+    trackObjectsRef.current = [];
+    if (trackPoints.length < 2) return;
+    const pathPoints = trackPoints.map((point, index) => new THREE.Vector3(point.x, 0.42 + Math.sin(index * 1.1) * 0.55 + index * 0.035, point.z));
+    const curve = new THREE.CatmullRomCurve3(pathPoints);
+    const rail = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, Math.max(48, trackPoints.length * 16), 0.075, 8, false),
+      new THREE.MeshStandardMaterial({ color: "#7dd3fc", emissive: "#0c4a6e", emissiveIntensity: 0.55, metalness: 0.45, roughness: 0.28 })
+    );
+    rail.castShadow = true;
+    scene.add(rail);
+    trackObjectsRef.current.push(rail);
+    pathPoints.forEach(point => {
+      const supportHeight = Math.max(0.08, point.y);
+      const support = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.035, 0.05, supportHeight, 8),
+        new THREE.MeshStandardMaterial({ color: "#94a3b8", metalness: 0.35, roughness: 0.5 })
+      );
+      support.position.set(point.x, supportHeight / 2 - 0.035, point.z);
+      support.castShadow = true;
+      scene.add(support);
+      trackObjectsRef.current.push(support);
+    });
+    return () => {
+      for (const obj of trackObjectsRef.current) {
+        scene.remove(obj);
+        obj.traverse(node => {
+          if (node instanceof THREE.Mesh) {
+            node.geometry.dispose();
+            const material = node.material;
+            if (Array.isArray(material)) material.forEach(item => item.dispose());
+            else material.dispose();
+          }
+        });
+      }
+      trackObjectsRef.current = [];
+    };
+  }, [trackPoints]);
 
   const snapshot = () => { history.current.push(blocks.map(b => ({...b}))); if(history.current.length>40) history.current.shift(); future.current=[]; };
   const placeAt = (x: number, z: number) => {
@@ -211,8 +267,8 @@ export default function App() {
       {cameraError&&<div className="error-banner">{cameraError}</div>}
       <div className="hint-card"><MousePointer2 size={16}/><span>{hint}</span></div>
       <div className="workspace-actions"><button onClick={undo} disabled={!history.current.length} aria-label="Undo"><Undo2/></button><button onClick={redo} disabled={!future.current.length} aria-label="Redo"><Redo2/></button><button onClick={save} aria-label="Save scene"><Save/></button><button onClick={load} aria-label="Load scene"><RotateCcw/></button><button onClick={clear} aria-label="Clear workspace"><Trash2/></button></div>
-      <div className="mode-switch">{(["build","move","delete"] as const).map(m=><button key={m} className={mode===m?"mode active":"mode"} onClick={()=>{setMode(m);setHint(m==="build"?"Tap the grid to place a block.":m==="move"?"Tap near a block to move it.":"Tap near a block to delete it.");}}>{m}</button>)}</div>
+      <div className="mode-switch">{(["build","move","delete"] as const).map(m=><button key={m} className={!trackMode&&mode===m?"mode active":"mode"} onClick={()=>{setTrackMode(false);setMode(m);setHint(m==="build"?"Tap the grid to place a block.":m==="move"?"Tap near a block to move it.":"Tap near a block to delete it.");}}>{m}</button>)}<button className={trackMode?"mode active":"mode"} onClick={()=>{setTrackMode(true);setHint("Tap the grid to add your first coaster track point.");}}>TRACK {trackPoints.length?`· ${trackPoints.length}`:""}</button></div>
     </section>
-    <section className="tool-dock"><div className="dock-heading"><span>OBJECT</span><span className="dock-sub">TAP TO SELECT</span></div><div className="shape-row"><button className={shape==="cube"?"shape active":"shape"} onClick={()=>setShape("cube")}><Box/><span>Cube</span></button><button className={shape==="sphere"?"shape active":"shape"} onClick={()=>setShape("sphere")}><Circle/><span>Sphere</span></button><button className={shape==="pyramid"?"shape active":"shape"} onClick={()=>setShape("pyramid")}><Triangle/><span>Pyramid</span></button></div><div className="dock-heading palette-heading"><span>COLOR</span><span className="dock-sub">MATERIAL</span></div><div className="palette-row">{palette.map(c=><button key={c} className={color===c?"swatch active":"swatch"} style={{background:c}} onClick={()=>setColor(c)} aria-label={"Select color "+c}/>)}</div><button className="primary-build" onClick={()=>{setMode("build");setHint("Tap anywhere on the grid to place a "+shape+".");}}><Move3D size={18}/> BUILD {shape.toUpperCase()} <span>↗</span></button><p className="footnote"><Hand size={14}/> Touch controls ready · Pinch to place when tracking is on</p></section>
+    <section className="tool-dock"><div className="dock-heading"><span>OBJECT</span><span className="dock-sub">TAP TO SELECT</span></div><div className="shape-row"><button className={shape==="cube"?"shape active":"shape"} onClick={()=>setShape("cube")}><Box/><span>Cube</span></button><button className={shape==="sphere"?"shape active":"shape"} onClick={()=>setShape("sphere")}><Circle/><span>Sphere</span></button><button className={shape==="pyramid"?"shape active":"shape"} onClick={()=>setShape("pyramid")}><Triangle/><span>Pyramid</span></button></div><div className="dock-heading palette-heading"><span>COLOR</span><span className="dock-sub">MATERIAL</span></div><div className="palette-row">{palette.map(c=><button key={c} className={color===c?"swatch active":"swatch"} style={{background:c}} onClick={()=>setColor(c)} aria-label={"Select color "+c}/>)}</div><button className="primary-build" onClick={()=>{setTrackMode(false);setMode("build");setHint("Tap anywhere on the grid to place a "+shape+".");}}><Move3D size={18}/> BUILD {shape.toUpperCase()} <span>↗</span></button><p className="footnote"><Hand size={14}/> Touch controls ready · Pinch to place when tracking is on</p></section>
   </main>;
 }
