@@ -36,13 +36,14 @@ export default function App() {
     const host = stageRef.current;
     if (!host) return;
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#0b1020");
+    scene.background = null;
     scene.fog = new THREE.Fog("#0b1020", 10, 24);
     const camera = new THREE.PerspectiveCamera(45, host.clientWidth / host.clientHeight, 0.1, 100);
     camera.position.set(6, 7, 9);
     camera.lookAt(0, 0, 0);
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.8));
+    renderer.setClearColor(0x0b1020, 0);
     renderer.setSize(host.clientWidth, host.clientHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
