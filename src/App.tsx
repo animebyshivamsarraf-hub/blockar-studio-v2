@@ -159,7 +159,7 @@ export default function App() {
             const scene = sceneRef.current, camera = cameraRef.current;
             if (scene && camera) {
               const raycaster = new THREE.Raycaster();
-              raycaster.setFromCamera(new THREE.Vector2((1-index.x)*2-1, -(index.y*2-1)), camera);
+              raycaster.setFromCamera(new THREE.Vector2(index.x*2-1, -(index.y*2-1)), camera);
               const floor = scene.getObjectByName("floor");
               const hits = floor ? raycaster.intersectObject(floor) : [];
               if (hits.length) placeAtRef.current(hits[0].point.x, hits[0].point.z);
