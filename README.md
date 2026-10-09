@@ -7,9 +7,9 @@ A mobile-first 3D construction studio being developed toward hand-controlled bui
 - Responsive mobile-first dark interface.
 - Three.js 3D workspace with cube, sphere, and pyramid placement.
 - Touch-first Build, Move, and Delete modes.
-- Color selection, Undo/Redo for block edits, local Save/Load, and clear workspace.
+- Color selection, full-scene Undo/Redo for block and track edits, local Save/Load, and clear workspace.
 - Camera preview with permission/error handling.
-- MediaPipe Hand Landmarker integration: pinch thumb and index finger to place the selected object on the 3D floor.
+- MediaPipe Hand Landmarker integration: pinch thumb and index finger to place the selected object on the 3D floor, with separate pinch/release thresholds to reduce jitter.
 - GPU inference is attempted first, with a CPU fallback.
 - Basic coaster track drawing: switch to TRACK and tap multiple grid points to create an elevated curved rail with supports.
 - Save/Load includes both blocks and track points.
