@@ -12,7 +12,7 @@ A mobile-first 3D construction studio being developed toward hand-controlled bui
 - MediaPipe Hand Landmarker integration: pinch thumb and index finger to place the selected object on the 3D floor, with separate pinch/release thresholds to reduce jitter.
 - GPU inference is attempted first, with a CPU fallback.
 - Pinch hysteresis uses separate start/release thresholds; after a tracking interruption during a pinch, the user must visibly open their fingers before a new placement can trigger. This prevents accidental repeat placement on tracking recovery.
-- Primary-hand selection follows the index fingertip nearest to the previous frame when two hands are visible, reducing cursor jumps if MediaPipe changes the order of its detected hands.
+- Primary-hand selection follows the index fingertip nearest to the previous frame when two hands are visible, reducing cursor jumps if MediaPipe changes the order of its detected hands. A short-lived fingertip anchor is retained across brief occlusions to improve reacquisition.
 - Basic coaster track drawing: switch to TRACK and tap multiple grid points to create an elevated curved rail with supports.
 - Optional local `.spz` Gaussian-splat scene import using Spark, so a generated amusement-park scan can be loaded as visual scenery without bundling a large binary into the repository.
 - Save/Load includes both blocks and track points.
