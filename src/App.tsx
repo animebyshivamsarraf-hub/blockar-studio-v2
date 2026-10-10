@@ -26,6 +26,9 @@ export default function App() {
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
   const trackingRafRef = useRef<number>(0);
   const wasPinchingRef = useRef(false);
+  // If a hand disappears while pinching, require a visible release before accepting
+  // another pinch. This prevents accidental block placement when tracking returns.
+  const pinchNeedsReleaseRef = useRef(false);
   const smoothedHandPointRef = useRef<{x:number;y:number;time:number}|null>(null);
   const handLostAtRef = useRef(0);
   const trackingStartingRef = useRef(false);
@@ -255,6 +258,7 @@ export default function App() {
     handLandmarkerRef.current?.close();
     handLandmarkerRef.current = null;
     wasPinchingRef.current = false;
+    pinchNeedsReleaseRef.current = false;
     smoothedHandPointRef.current = null;
     handLostAtRef.current = 0;
     if (handCursorRef.current) handCursorRef.current.style.opacity = "0";
@@ -334,6 +338,7 @@ export default function App() {
             // Keep the pinch latch briefly through occlusion, then re-arm so the user
             // can continue without needing to restart tracking.
             if (performance.now() - handLostAtRef.current > 350) {
+              if (wasPinchingRef.current) pinchNeedsReleaseRef.current = true;
               wasPinchingRef.current = false;
             }
             smoothedHandPointRef.current = null;
@@ -342,7 +347,14 @@ export default function App() {
           handLostAtRef.current = 0;
           const thumb = hand[4], index = hand[8];
           const pinchDistance = Math.hypot(thumb.x-index.x, thumb.y-index.y);
-          const pinching = wasPinchingRef.current ? pinchDistance < 0.075 : pinchDistance < 0.05;
+          // Use hysteresis to avoid flicker around the pinch threshold. After a tracking
+          // interruption during a pinch, do not fire again until the fingers visibly open.
+          if (pinchNeedsReleaseRef.current && pinchDistance > 0.085) {
+            pinchNeedsReleaseRef.current = false;
+            wasPinchingRef.current = false;
+          }
+          const pinching = !pinchNeedsReleaseRef.current &&
+            (wasPinchingRef.current ? pinchDistance < 0.075 : pinchDistance < 0.05);
           setHandStatus(result.landmarks.length > 1 ? (pinching ? "2 HANDS · PINCH" : "2 HANDS TRACKED") : (pinching ? "PINCH DETECTED" : "HAND TRACKED"));
 
           // Smooth the index fingertip in screen space; faster motion follows more quickly.
