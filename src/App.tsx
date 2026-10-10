@@ -20,6 +20,8 @@ export default function App() {
   const handLandmarkerRef = useRef<HandLandmarker | null>(null);
   const trackingRafRef = useRef<number>(0);
   const wasPinchingRef = useRef(false);
+  const smoothedHandPointRef = useRef<{x:number;y:number;time:number}|null>(null);
+  const handLostAtRef = useRef(0);
   const trackingStartingRef = useRef(false);
   const cameraStartingRef = useRef(false);
   const sessionTokenRef = useRef(0);
@@ -181,6 +183,8 @@ export default function App() {
     handLandmarkerRef.current?.close();
     handLandmarkerRef.current = null;
     wasPinchingRef.current = false;
+    smoothedHandPointRef.current = null;
+    handLostAtRef.current = 0;
     setTrackingOn(false);
     setHandStatus("HAND TRACKING OFF");
     const stream = videoRef.current?.srcObject as MediaStream | null;
@@ -217,7 +221,7 @@ export default function App() {
       if (sessionToken !== sessionTokenRef.current) return;
       const modelOptions = {
         baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task" },
-        runningMode: "VIDEO" as const, numHands: 1
+        runningMode: "VIDEO" as const, numHands: 2
       };
       let landmarker: HandLandmarker;
       try {
@@ -241,16 +245,42 @@ export default function App() {
         try {
           const result = detector.detectForVideo(v, performance.now());
           const hand = result.landmarks?.[0];
-          if (!hand) { setHandStatus("HAND NOT FOUND"); return; }
+          if (!hand) {
+            setHandStatus("HAND NOT FOUND");
+            if (!handLostAtRef.current) handLostAtRef.current = performance.now();
+            // Keep the pinch latch while the hand is briefly occluded to avoid duplicate placements.
+            smoothedHandPointRef.current = null;
+            return;
+          }
+          handLostAtRef.current = 0;
           const thumb = hand[4], index = hand[8];
           const pinchDistance = Math.hypot(thumb.x-index.x, thumb.y-index.y);
           const pinching = wasPinchingRef.current ? pinchDistance < 0.075 : pinchDistance < 0.05;
-          setHandStatus(pinching ? "PINCH DETECTED" : "HAND TRACKED");
+          setHandStatus(result.landmarks.length > 1 ? (pinching ? "2 HANDS · PINCH" : "2 HANDS TRACKED") : (pinching ? "PINCH DETECTED" : "HAND TRACKED"));
+
+          // Smooth the index fingertip in screen space; faster motion follows more quickly.
+          const now = performance.now();
+          const previous = smoothedHandPointRef.current;
+          const dt = previous ? Math.max(1, now - previous.time) : 16;
+          const alpha = 1 - Math.exp(-dt / 55);
+          const point = previous
+            ? { x: previous.x + (index.x - previous.x) * alpha, y: previous.y + (index.y - previous.y) * alpha, time: now }
+            : { x: index.x, y: index.y, time: now };
+          smoothedHandPointRef.current = point;
+
           if (pinching && !wasPinchingRef.current) {
-            const scene = sceneRef.current, camera = cameraRef.current;
-            if (scene && camera) {
+            const scene = sceneRef.current, camera = cameraRef.current, video = videoRef.current;
+            if (scene && camera && video) {
+              const rect = video.getBoundingClientRect();
+              const sourceW = video.videoWidth || rect.width;
+              const sourceH = video.videoHeight || rect.height;
+              // Match object-fit: cover so the hand ray agrees with the visible camera crop.
+              const scale = Math.max(rect.width / sourceW, rect.height / sourceH);
+              const renderedW = sourceW * scale, renderedH = sourceH * scale;
+              const screenX = (point.x * renderedW - (renderedW - rect.width) / 2) / Math.max(1, rect.width);
+              const screenY = (point.y * renderedH - (renderedH - rect.height) / 2) / Math.max(1, rect.height);
               const raycaster = new THREE.Raycaster();
-              raycaster.setFromCamera(new THREE.Vector2(index.x*2-1, -(index.y*2-1)), camera);
+              raycaster.setFromCamera(new THREE.Vector2(screenX * 2 - 1, -(screenY * 2 - 1)), camera);
               const floor = scene.getObjectByName("floor");
               const hits = floor ? raycaster.intersectObject(floor) : [];
               if (hits.length) placeAtRef.current(hits[0].point.x, hits[0].point.z);
