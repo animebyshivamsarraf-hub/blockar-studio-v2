@@ -12,6 +12,7 @@ A mobile-first 3D construction studio being developed toward hand-controlled bui
 - MediaPipe Hand Landmarker integration: pinch thumb and index finger to place the selected object on the 3D floor, with separate pinch/release thresholds to reduce jitter.
 - GPU inference is attempted first, with a CPU fallback.
 - Basic coaster track drawing: switch to TRACK and tap multiple grid points to create an elevated curved rail with supports.
+- Optional local `.spz` Gaussian-splat scene import using Spark, so a generated amusement-park scan can be loaded as visual scenery without bundling a large binary into the repository.
 - Save/Load includes both blocks and track points.
 - GitHub Actions build check and GitHub Pages deployment workflow.
 
@@ -34,6 +35,7 @@ npm run preview
 ## Important limitations
 
 - Hand tracking requires camera permission, HTTPS (or localhost), and network access to load the MediaPipe model/WASM files.
+- Imported `.spz` scenery is a visual Gaussian-splat environment, not editable coaster geometry or a room-depth map. The user must select the asset from the device; the binary is not included in the Git repository.
 - The current camera view is a camera-backed 3D overlay, **not yet calibrated/world-locked AR**. Objects are placed on a virtual floor, not anchored to real surfaces.
 - Coaster track editing is a first version: it creates a curved rail and supports, but there is no train, collision physics, or ride preview yet.
 - A GitHub Actions build and physical-device test must pass before calling the app verified.
