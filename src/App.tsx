@@ -330,7 +330,18 @@ export default function App() {
         lastVideoTime = v.currentTime;
         try {
           const result = detector.detectForVideo(v, performance.now());
-          const hand = result.landmarks?.[0];
+          // MediaPipe can reorder its hand list between frames. Keep following the
+          // hand nearest to the last index-finger position instead of blindly switching
+          // to landmarks[0], which makes the cursor jump when two hands cross.
+          const detectedHands = result.landmarks ?? [];
+          const previousPoint = smoothedHandPointRef.current;
+          const hand = previousPoint && detectedHands.length > 1
+            ? detectedHands.reduce((closest, candidate) => {
+                const candidateDistance = Math.hypot(candidate[8].x - previousPoint.x, candidate[8].y - previousPoint.y);
+                const closestDistance = Math.hypot(closest[8].x - previousPoint.x, closest[8].y - previousPoint.y);
+                return candidateDistance < closestDistance ? candidate : closest;
+              })
+            : detectedHands[0];
           if (!hand) {
             setHandStatus("HAND NOT FOUND");
             if (handCursorRef.current) handCursorRef.current.style.opacity = "0";
