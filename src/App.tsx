@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent } from "react";
 import * as THREE from "three";
 import type { HandLandmarker } from "@mediapipe/tasks-vision";
 import { Camera, Hand, Box, Circle, Triangle, Undo2, Redo2, Trash2, Save, RotateCcw, Move3D, MousePointer2 } from "lucide-react";
@@ -14,6 +14,11 @@ export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const handCursorRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const parkSplatRef = useRef<THREE.Object3D | null>(null);
+  const sparkRendererRef = useRef<THREE.Object3D | null>(null);
+  const parkFileInputRef = useRef<HTMLInputElement>(null);
+  const [parkLoaded, setParkLoaded] = useState(false);
+  const [parkLoading, setParkLoading] = useState(false);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const objectsRef = useRef(new Map<number, THREE.Object3D>());
@@ -143,6 +148,72 @@ export default function App() {
       trackObjectsRef.current = [];
     };
   }, [trackPoints]);
+
+  const loadParkSplat = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Allow selecting the same file again after removing or replacing it.
+    event.target.value = "";
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".spz")) {
+      setHint("Choose a .spz Gaussian-splat scene file.");
+      return;
+    }
+    const scene = sceneRef.current;
+    const renderer = rendererRef.current;
+    if (!scene || !renderer) {
+      setHint("3D workspace is still starting. Try importing the park again.");
+      return;
+    }
+    setParkLoading(true);
+    setHint("Loading amusement-park scene… large scenes may take a little while on mobile.");
+    let candidate: THREE.Object3D | null = null;
+    try {
+      // Spark supports the SPZ Gaussian-splat format. Load it only when requested
+      // so the initial BlockAR bundle stays smaller for mobile users.
+      const { SparkRenderer, SplatMesh } = await import("@sparkjsdev/spark");
+      if (!sparkRendererRef.current) {
+        const sparkRenderer = new SparkRenderer({ renderer });
+        sparkRendererRef.current = sparkRenderer;
+        scene.add(sparkRenderer);
+      }
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const splat = new SplatMesh({ fileBytes: bytes, fileName: file.name, lod: true });
+      splat.quaternion.set(1, 0, 0, 0);
+      candidate = splat;
+      await splat.initialized;
+      const currentScene = sceneRef.current;
+      if (!currentScene) throw new Error("The 3D workspace closed before the scene finished loading.");
+      if (parkSplatRef.current) {
+        currentScene.remove(parkSplatRef.current);
+        const previous = parkSplatRef.current as THREE.Object3D & { dispose?: () => void };
+        previous.dispose?.();
+      }
+      currentScene.add(splat);
+      parkSplatRef.current = splat;
+      setParkLoaded(true);
+      setHint("Amusement-park Gaussian-splat scene loaded. It is visual scenery; coaster rails and blocks remain editable game objects.");
+    } catch (error) {
+      if (candidate) {
+        sceneRef.current?.remove(candidate);
+        const disposable = candidate as THREE.Object3D & { dispose?: () => void };
+        disposable.dispose?.();
+      }
+      setHint(error instanceof Error ? "Could not load this SPZ scene: " + error.message : "Could not load this SPZ scene. Try a valid .spz file.");
+    } finally {
+      setParkLoading(false);
+    }
+  };
+  const removeParkSplat = () => {
+    const scene = sceneRef.current;
+    if (scene && parkSplatRef.current) {
+      scene.remove(parkSplatRef.current);
+      const previous = parkSplatRef.current as THREE.Object3D & { dispose?: () => void };
+      previous.dispose?.();
+      parkSplatRef.current = null;
+    }
+    setParkLoaded(false);
+    setHint("Amusement-park scenery removed. Your blocks and coaster track are unchanged.");
+  };
 
   const snapshot = () => { history.current.push({ blocks: blocks.map(b => ({...b})), trackPoints: trackPoints.map(p => ({...p})) }); if(history.current.length>40) history.current.shift(); future.current=[]; };
   const placeAt = (x: number, z: number) => {
@@ -372,7 +443,7 @@ export default function App() {
     } catch(err) { if (sessionToken === sessionTokenRef.current) { setCameraError(err instanceof Error?err.message:"Camera permission was denied.");setCameraOn(false); } }
     finally { if (sessionToken === sessionTokenRef.current) cameraStartingRef.current = false; }
   };
-  useEffect(() => () => { cancelAnimationFrame(trackingRafRef.current); handLandmarkerRef.current?.close(); const stream=videoRef.current?.srcObject as MediaStream|null; stream?.getTracks().forEach(t=>t.stop()); }, []);
+  useEffect(() => () => { cancelAnimationFrame(trackingRafRef.current); handLandmarkerRef.current?.close(); const stream=videoRef.current?.srcObject as MediaStream|null; stream?.getTracks().forEach(t=>t.stop()); if (parkSplatRef.current) { sceneRef.current?.remove(parkSplatRef.current); const splat = parkSplatRef.current as THREE.Object3D & { dispose?: () => void }; splat.dispose?.(); parkSplatRef.current = null; } if (sparkRendererRef.current) { sceneRef.current?.remove(sparkRendererRef.current); const spark = sparkRendererRef.current as THREE.Object3D & { dispose?: () => void }; spark.dispose?.(); sparkRendererRef.current = null; } }, []);
   const undo=()=>{if(!history.current.length)return;future.current.push({blocks:blocks.map(b=>({...b})),trackPoints:trackPoints.map(p=>({...p}))});const previous=history.current.pop()!;setBlocks(previous.blocks);setTrackPoints(previous.trackPoints);setSelected(null);setHint("Undo complete.");};
   const redo=()=>{if(!future.current.length)return;history.current.push({blocks:blocks.map(b=>({...b})),trackPoints:trackPoints.map(p=>({...p}))});const next=future.current.pop()!;setBlocks(next.blocks);setTrackPoints(next.trackPoints);setSelected(null);setHint("Redo complete.");};
   const save=()=>{try{localStorage.setItem("blockar-v2-scene",JSON.stringify({blocks,trackPoints}));setHint("Scene and coaster track saved on this device.");}catch{setHint("Could not save scene on this device.");}};
@@ -386,6 +457,9 @@ export default function App() {
       <div className="workspace-actions"><button onClick={undo} disabled={!history.current.length} aria-label="Undo"><Undo2/></button><button onClick={redo} disabled={!future.current.length} aria-label="Redo"><Redo2/></button><button onClick={save} aria-label="Save scene"><Save/></button><button onClick={load} aria-label="Load scene"><RotateCcw/></button><button onClick={clear} aria-label="Clear workspace"><Trash2/></button></div>
       <div className="mode-switch">{(["build","move","delete"] as const).map(m=><button key={m} className={!trackMode&&mode===m?"mode active":"mode"} onClick={()=>{setTrackMode(false);setMode(m);setHint(m==="build"?"Tap the grid to place a block.":m==="move"?"Tap near a block to move it.":"Tap near a block to delete it.");}}>{m}</button>)}<button className={trackMode?"mode active":"mode"} onClick={()=>{setTrackMode(true);setHint("Tap the grid to add your first coaster track point.");}}>TRACK {trackPoints.length?`· ${trackPoints.length}`:""}</button></div>
     </section>
-    <section className="tool-dock"><div className="dock-heading"><span>OBJECT</span><span className="dock-sub">TAP TO SELECT</span></div><div className="shape-row"><button className={shape==="cube"?"shape active":"shape"} onClick={()=>setShape("cube")}><Box/><span>Cube</span></button><button className={shape==="sphere"?"shape active":"shape"} onClick={()=>setShape("sphere")}><Circle/><span>Sphere</span></button><button className={shape==="pyramid"?"shape active":"shape"} onClick={()=>setShape("pyramid")}><Triangle/><span>Pyramid</span></button></div><div className="dock-heading palette-heading"><span>COLOR</span><span className="dock-sub">MATERIAL</span></div><div className="palette-row">{palette.map(c=><button key={c} className={color===c?"swatch active":"swatch"} style={{background:c}} onClick={()=>setColor(c)} aria-label={"Select color "+c}/>)}</div><button className="primary-build" onClick={()=>{setTrackMode(false);setMode("build");setHint("Tap anywhere on the grid to place a "+shape+".");}}><Move3D size={18}/> BUILD {shape.toUpperCase()} <span>↗</span></button><p className="footnote"><Hand size={14}/> Touch controls ready · Pinch to place when tracking is on</p></section>
+    <section className="tool-dock"><div className="dock-heading"><span>OBJECT</span><span className="dock-sub">TAP TO SELECT</span></div><div className="shape-row"><button className={shape==="cube"?"shape active":"shape"} onClick={()=>setShape("cube")}><Box/><span>Cube</span></button><button className={shape==="sphere"?"shape active":"shape"} onClick={()=>setShape("sphere")}><Circle/><span>Sphere</span></button><button className={shape==="pyramid"?"shape active":"shape"} onClick={()=>setShape("pyramid")}><Triangle/><span>Pyramid</span></button></div><div className="dock-heading palette-heading"><span>COLOR</span><span className="dock-sub">MATERIAL</span></div><div className="palette-row">{palette.map(c=><button key={c} className={color===c?"swatch active":"swatch"} style={{background:c}} onClick={()=>setColor(c)} aria-label={"Select color "+c}/>)}</div><button className="primary-build" onClick={()=>{setTrackMode(false);setMode("build");setHint("Tap anywhere on the grid to place a "+shape+".");}}><Move3D size={18}/> BUILD {shape.toUpperCase()} <span>↗</span></button>
+      <input ref={parkFileInputRef} type="file" accept=".spz,application/octet-stream" onChange={loadParkSplat} style={{display:"none"}} aria-label="Choose amusement park SPZ scene"/>
+      <button className="primary-build" style={{marginTop:8,background:"linear-gradient(135deg,#0f766e,#0891b2)"}} onClick={()=>parkFileInputRef.current?.click()} disabled={parkLoading}><Move3D size={18}/> {parkLoading?"LOADING PARK…":parkLoaded?"REPLACE PARK .SPZ":"IMPORT PARK .SPZ"} <span>↗</span></button>
+      {parkLoaded&&<button className="primary-build" style={{marginTop:6,background:"#273449"}} onClick={removeParkSplat}>REMOVE PARK SCENERY</button>}<p className="footnote"><Hand size={14}/> Touch controls ready · Pinch to place when tracking is on</p></section>
   </main>;
 }
