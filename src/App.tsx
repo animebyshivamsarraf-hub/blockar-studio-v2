@@ -12,6 +12,7 @@ const palette = ["#60a5fa", "#fb7185", "#fbbf24", "#34d399", "#c084fc", "#f8fafc
 export default function App() {
   const stageRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const handCursorRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -185,6 +186,7 @@ export default function App() {
     wasPinchingRef.current = false;
     smoothedHandPointRef.current = null;
     handLostAtRef.current = 0;
+    if (handCursorRef.current) handCursorRef.current.style.opacity = "0";
     setTrackingOn(false);
     setHandStatus("HAND TRACKING OFF");
     const stream = videoRef.current?.srcObject as MediaStream | null;
@@ -247,6 +249,7 @@ export default function App() {
           const hand = result.landmarks?.[0];
           if (!hand) {
             setHandStatus("HAND NOT FOUND");
+            if (handCursorRef.current) handCursorRef.current.style.opacity = "0";
             if (!handLostAtRef.current) handLostAtRef.current = performance.now();
             // Keep the pinch latch while the hand is briefly occluded to avoid duplicate placements.
             smoothedHandPointRef.current = null;
@@ -268,22 +271,29 @@ export default function App() {
             : { x: index.x, y: index.y, time: now };
           smoothedHandPointRef.current = point;
 
-          if (pinching && !wasPinchingRef.current) {
-            const scene = sceneRef.current, camera = cameraRef.current, video = videoRef.current;
-            if (scene && camera && video) {
-              const rect = video.getBoundingClientRect();
-              const sourceW = video.videoWidth || rect.width;
-              const sourceH = video.videoHeight || rect.height;
-              // Match object-fit: cover so the hand ray agrees with the visible camera crop.
-              const scale = Math.max(rect.width / sourceW, rect.height / sourceH);
-              const renderedW = sourceW * scale, renderedH = sourceH * scale;
-              const screenX = (point.x * renderedW - (renderedW - rect.width) / 2) / Math.max(1, rect.width);
-              const screenY = (point.y * renderedH - (renderedH - rect.height) / 2) / Math.max(1, rect.height);
-              const raycaster = new THREE.Raycaster();
-              raycaster.setFromCamera(new THREE.Vector2(screenX * 2 - 1, -(screenY * 2 - 1)), camera);
-              const floor = scene.getObjectByName("floor");
-              const hits = floor ? raycaster.intersectObject(floor) : [];
-              if (hits.length) placeAtRef.current(hits[0].point.x, hits[0].point.z);
+          const video = videoRef.current;
+          const rect = video?.getBoundingClientRect();
+          if (video && rect && handCursorRef.current) {
+            const sourceW = video.videoWidth || rect.width;
+            const sourceH = video.videoHeight || rect.height;
+            // Account for the center crop caused by object-fit: cover.
+            const scale = Math.max(rect.width / sourceW, rect.height / sourceH);
+            const renderedW = sourceW * scale, renderedH = sourceH * scale;
+            const screenX = (point.x * renderedW - (renderedW - rect.width) / 2) / Math.max(1, rect.width);
+            const screenY = (point.y * renderedH - (renderedH - rect.height) / 2) / Math.max(1, rect.height);
+            handCursorRef.current.style.left = (screenX * 100) + "%";
+            handCursorRef.current.style.top = (screenY * 100) + "%";
+            handCursorRef.current.style.opacity = screenX >= 0 && screenX <= 1 && screenY >= 0 && screenY <= 1 ? "1" : "0";
+            handCursorRef.current.dataset.pinch = String(pinching);
+            if (pinching && !wasPinchingRef.current) {
+              const scene = sceneRef.current, camera = cameraRef.current;
+              if (scene && camera) {
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(new THREE.Vector2(screenX * 2 - 1, -(screenY * 2 - 1)), camera);
+                const floor = scene.getObjectByName("floor");
+                const hits = floor ? raycaster.intersectObject(floor) : [];
+                if (hits.length) placeAtRef.current(hits[0].point.x, hits[0].point.z);
+              }
             }
           }
           wasPinchingRef.current = pinching;
@@ -357,7 +367,7 @@ export default function App() {
   const clear=()=>{if(!blocks.length&&!trackPoints.length)return;snapshot();setBlocks([]);setTrackPoints([]);setSelected(null);setHint("Workspace and coaster track cleared.");};
   return <main className="app-shell">
     <header className="topbar"><div className="brand-mark"><Box size={22}/></div><div className="brand-copy"><strong>BlockAR <span>STUDIO</span></strong><small>BUILD YOUR WORLD</small></div><div className="top-spacer"/><div className="count-pill">{blocks.length} BLOCKS</div><button className={trackingOn?"icon-button active":"icon-button"} onClick={toggleTracking} aria-label={trackingOn?"Stop hand tracking":"Start hand tracking"}><Hand size={19}/></button><button className={cameraOn?"icon-button active":"icon-button"} onClick={toggleCamera} aria-label={cameraOn?"Turn camera off":"Turn camera on"}><Camera size={19}/></button></header>
-    <section className="workspace"><video ref={videoRef} className={cameraOn?"camera-feed visible":"camera-feed"} playsInline muted autoPlay/><div ref={stageRef} className="three-stage" onPointerDown={onStagePointer}/><div className="scene-badge"><span className="live-dot"/>{trackingOn?handStatus:cameraOn?"CAMERA LIVE":"3D WORKSPACE"} <span className="separator">/</span> {trackingOn?"PINCH TO PLACE":"TOUCH BUILD"}</div>
+    <section className="workspace"><video ref={videoRef} className={cameraOn?"camera-feed visible":"camera-feed"} playsInline muted autoPlay/><div ref={handCursorRef} className="hand-cursor" aria-hidden="true"/><div ref={stageRef} className="three-stage" onPointerDown={onStagePointer}/><div className="scene-badge"><span className="live-dot"/>{trackingOn?handStatus:cameraOn?"CAMERA LIVE":"3D WORKSPACE"} <span className="separator">/</span> {trackingOn?"PINCH TO PLACE":"TOUCH BUILD"}</div>
       {cameraError&&<div className="error-banner">{cameraError}</div>}
       <div className="hint-card"><MousePointer2 size={16}/><span>{hint}</span></div>
       <div className="workspace-actions"><button onClick={undo} disabled={!history.current.length} aria-label="Undo"><Undo2/></button><button onClick={redo} disabled={!future.current.length} aria-label="Redo"><Redo2/></button><button onClick={save} aria-label="Save scene"><Save/></button><button onClick={load} aria-label="Load scene"><RotateCcw/></button><button onClick={clear} aria-label="Clear workspace"><Trash2/></button></div>
