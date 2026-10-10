@@ -205,10 +205,19 @@ export default function App() {
       setHandStatus("STARTING CAMERA…");
       const video = videoRef.current;
       if (!video) throw new Error("Camera preview is unavailable.");
-      // Reuse an already-open preview stream instead of requesting the camera twice.
+      // Hand tracking needs the front-facing camera. Do not accidentally reuse the rear
+      // camera opened by the separate camera-preview control.
       let stream = video.srcObject as MediaStream | null;
-      if (!stream || stream.getTracks().every(track => track.readyState !== "live")) {
-        stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:{ideal:640},height:{ideal:480}},audio:false});
+      const liveTrack = stream?.getVideoTracks().find(track => track.readyState === "live");
+      const facingMode = liveTrack?.getSettings().facingMode;
+      const isFrontCamera = facingMode === "user";
+      if (!stream || !liveTrack || !isFrontCamera) {
+        stream?.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+        stream = await navigator.mediaDevices.getUserMedia({
+          video:{facingMode:{ideal:"user"},width:{ideal:640},height:{ideal:480},frameRate:{ideal:30,max:30}},
+          audio:false
+        });
         if (sessionToken !== sessionTokenRef.current) { stream.getTracks().forEach(track => track.stop()); return; }
         video.srcObject = stream;
       }
@@ -251,7 +260,11 @@ export default function App() {
             setHandStatus("HAND NOT FOUND");
             if (handCursorRef.current) handCursorRef.current.style.opacity = "0";
             if (!handLostAtRef.current) handLostAtRef.current = performance.now();
-            // Keep the pinch latch while the hand is briefly occluded to avoid duplicate placements.
+            // Keep the pinch latch briefly through occlusion, then re-arm so the user
+            // can continue without needing to restart tracking.
+            if (performance.now() - handLostAtRef.current > 350) {
+              wasPinchingRef.current = false;
+            }
             smoothedHandPointRef.current = null;
             return;
           }
@@ -285,7 +298,7 @@ export default function App() {
             handCursorRef.current.style.top = (screenY * 100) + "%";
             handCursorRef.current.style.opacity = screenX >= 0 && screenX <= 1 && screenY >= 0 && screenY <= 1 ? "1" : "0";
             handCursorRef.current.dataset.pinch = String(pinching);
-            if (pinching && !wasPinchingRef.current) {
+            if (pinching && !wasPinchingRef.current && screenX >= 0 && screenX <= 1 && screenY >= 0 && screenY <= 1) {
               const scene = sceneRef.current, camera = cameraRef.current;
               if (scene && camera) {
                 const raycaster = new THREE.Raycaster();
