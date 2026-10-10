@@ -30,6 +30,9 @@ export default function App() {
   // another pinch. This prevents accidental block placement when tracking returns.
   const pinchNeedsReleaseRef = useRef(false);
   const smoothedHandPointRef = useRef<{x:number;y:number;time:number}|null>(null);
+  // Keep a short-lived raw landmark anchor across brief occlusions so the primary hand
+  // can be reacquired without depending on MediaPipe's changing result order.
+  const lastTrackedIndexRef = useRef<{x:number;y:number;time:number}|null>(null);
   const handLostAtRef = useRef(0);
   const trackingStartingRef = useRef(false);
   const cameraStartingRef = useRef(false);
@@ -260,6 +263,7 @@ export default function App() {
     wasPinchingRef.current = false;
     pinchNeedsReleaseRef.current = false;
     smoothedHandPointRef.current = null;
+    lastTrackedIndexRef.current = null;
     handLostAtRef.current = 0;
     if (handCursorRef.current) handCursorRef.current.style.opacity = "0";
     setTrackingOn(false);
@@ -335,10 +339,14 @@ export default function App() {
           // to landmarks[0], which makes the cursor jump when two hands cross.
           const detectedHands = result.landmarks ?? [];
           const previousPoint = smoothedHandPointRef.current;
-          const hand = previousPoint && detectedHands.length > 1
+          const lastTracked = lastTrackedIndexRef.current;
+          const identityAnchor = lastTracked && performance.now() - lastTracked.time < 900
+            ? lastTracked
+            : previousPoint;
+          const hand = identityAnchor && detectedHands.length > 1
             ? detectedHands.reduce((closest, candidate) => {
-                const candidateDistance = Math.hypot(candidate[8].x - previousPoint.x, candidate[8].y - previousPoint.y);
-                const closestDistance = Math.hypot(closest[8].x - previousPoint.x, closest[8].y - previousPoint.y);
+                const candidateDistance = Math.hypot(candidate[8].x - identityAnchor.x, candidate[8].y - identityAnchor.y);
+                const closestDistance = Math.hypot(closest[8].x - identityAnchor.x, closest[8].y - identityAnchor.y);
                 return candidateDistance < closestDistance ? candidate : closest;
               })
             : detectedHands[0];
@@ -357,6 +365,7 @@ export default function App() {
           }
           handLostAtRef.current = 0;
           const thumb = hand[4], index = hand[8];
+          lastTrackedIndexRef.current = { x: index.x, y: index.y, time: performance.now() };
           const pinchDistance = Math.hypot(thumb.x-index.x, thumb.y-index.y);
           // Use hysteresis to avoid flicker around the pinch threshold. After a tracking
           // interruption during a pinch, do not fire again until the fingers visibly open.
