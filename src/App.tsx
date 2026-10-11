@@ -448,7 +448,11 @@ export default function App() {
                     const id = dragBlockIdRef.current;
                     const x = Math.round(target.x * 2) / 2;
                     const z = Math.round(target.z * 2) / 2;
-                    setBlocks(prev => prev.map(block => block.id === id ? { ...block, x, z } : block));
+                    setBlocks(prev => {
+                      const current = prev.find(block => block.id === id);
+                      if (!current || (current.x === x && current.z === z)) return prev;
+                      return prev.map(block => block.id === id ? { ...block, x, z } : block);
+                    });
                   }
                 }
               }
