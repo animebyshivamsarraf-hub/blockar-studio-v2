@@ -38,6 +38,11 @@ export default function App() {
   const cameraStartingRef = useRef(false);
   const sessionTokenRef = useRef(0);
   const placeAtRef = useRef<(x:number,z:number)=>void>(()=>{});
+  const blocksRef = useRef<Placed[]>([]);
+  const modeRef = useRef<"build" | "move" | "delete">("build");
+  const trackModeRef = useRef(false);
+  const snapshotRef = useRef<()=>void>(()=>{});
+  const dragBlockIdRef = useRef<number | null>(null);
   const [trackingOn, setTrackingOn] = useState(false);
   const [handStatus, setHandStatus] = useState("HAND TRACKING OFF");
   const [cameraOn, setCameraOn] = useState(false);
@@ -50,6 +55,9 @@ export default function App() {
   const [trackMode, setTrackMode] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [hint, setHint] = useState("Tap the grid to place your first block.");
+  blocksRef.current = blocks;
+  modeRef.current = mode;
+  trackModeRef.current = trackMode;
   const history = useRef<SceneSnapshot[]>([]);
   const future = useRef<SceneSnapshot[]>([]);
   const nextId = useRef(1);
@@ -222,6 +230,7 @@ export default function App() {
   };
 
   const snapshot = () => { history.current.push({ blocks: blocks.map(b => ({...b})), trackPoints: trackPoints.map(p => ({...p})) }); if(history.current.length>40) history.current.shift(); future.current=[]; };
+  snapshotRef.current = snapshot;
   const placeAt = (x: number, z: number) => {
     if (trackMode) {
       snapshot();
@@ -264,6 +273,7 @@ export default function App() {
     pinchNeedsReleaseRef.current = false;
     smoothedHandPointRef.current = null;
     lastTrackedIndexRef.current = null;
+    dragBlockIdRef.current = null;
     handLostAtRef.current = 0;
     if (handCursorRef.current) handCursorRef.current.style.opacity = "0";
     setTrackingOn(false);
@@ -359,6 +369,10 @@ export default function App() {
             if (performance.now() - handLostAtRef.current > 350) {
               if (wasPinchingRef.current) pinchNeedsReleaseRef.current = true;
               wasPinchingRef.current = false;
+              if (dragBlockIdRef.current !== null) {
+                dragBlockIdRef.current = null;
+                setHint("Hand lost. Block released in its current position.");
+              }
             }
             smoothedHandPointRef.current = null;
             return;
@@ -401,15 +415,47 @@ export default function App() {
             handCursorRef.current.style.top = (screenY * 100) + "%";
             handCursorRef.current.style.opacity = screenX >= 0 && screenX <= 1 && screenY >= 0 && screenY <= 1 ? "1" : "0";
             handCursorRef.current.dataset.pinch = String(pinching);
-            if (pinching && !wasPinchingRef.current && screenX >= 0 && screenX <= 1 && screenY >= 0 && screenY <= 1) {
+            const pinchStarted = pinching && !wasPinchingRef.current;
+            const validScreenPoint = screenX >= 0 && screenX <= 1 && screenY >= 0 && screenY <= 1;
+            if (pinching && validScreenPoint) {
               const scene = sceneRef.current, camera = cameraRef.current;
               if (scene && camera) {
                 const raycaster = new THREE.Raycaster();
                 raycaster.setFromCamera(new THREE.Vector2(screenX * 2 - 1, -(screenY * 2 - 1)), camera);
                 const floor = scene.getObjectByName("floor");
                 const hits = floor ? raycaster.intersectObject(floor) : [];
-                if (hits.length) placeAtRef.current(hits[0].point.x, hits[0].point.z);
+                if (hits.length) {
+                  const target = hits[0].point;
+                  if (pinchStarted) {
+                    if (!trackModeRef.current && modeRef.current === "move") {
+                      const nearest = blocksRef.current
+                        .map(block => ({ block, distance: Math.hypot(block.x - target.x, block.z - target.z) }))
+                        .filter(item => item.distance < 1.25)
+                        .sort((a, b) => a.distance - b.distance)[0]?.block;
+                      if (nearest) {
+                        snapshotRef.current();
+                        dragBlockIdRef.current = nearest.id;
+                        setSelected(nearest.id);
+                        setHint("Block grabbed. Move your pinched fingers, then open them to release.");
+                      } else {
+                        setHint("Move your hand over a block and pinch to grab it.");
+                      }
+                    } else {
+                      placeAtRef.current(target.x, target.z);
+                    }
+                  }
+                  if (dragBlockIdRef.current !== null) {
+                    const id = dragBlockIdRef.current;
+                    const x = Math.round(target.x * 2) / 2;
+                    const z = Math.round(target.z * 2) / 2;
+                    setBlocks(prev => prev.map(block => block.id === id ? { ...block, x, z } : block));
+                  }
+                }
               }
+            }
+            if (!pinching && wasPinchingRef.current && dragBlockIdRef.current !== null) {
+              dragBlockIdRef.current = null;
+              setHint("Block released.");
             }
           }
           wasPinchingRef.current = pinching;
