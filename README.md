@@ -2,21 +2,17 @@
 
 A mobile-first 3D construction studio being developed toward hand-controlled building, roller-coaster tracks, and real-world AR.
 
-## Current features in the repository
+## Current features
 
-- Responsive mobile-first dark interface.
-- Three.js 3D workspace with cube, sphere, and pyramid placement.
-- Touch-first Build, Move, and Delete modes.
-- Color selection, full-scene Undo/Redo for block and track edits, local Save/Load, and clear workspace.
-- Camera preview with permission/error handling.
-- MediaPipe Hand Landmarker integration: pinch thumb and index finger to place the selected object on the 3D floor, with separate pinch/release thresholds to reduce jitter.
-- GPU inference is attempted first, with a CPU fallback.
-- Pinch hysteresis uses separate start/release thresholds; after a tracking interruption during a pinch, the user must visibly open their fingers before a new placement can trigger. This prevents accidental repeat placement on tracking recovery.
-- Primary-hand selection follows the index fingertip nearest to the previous frame when two hands are visible, reducing cursor jumps if MediaPipe changes the order of its detected hands. A short-lived fingertip anchor is retained across brief occlusions to improve reacquisition.
-- Basic coaster track drawing: switch to TRACK and tap multiple grid points to create an elevated curved rail with supports.
-- Optional local `.spz` Gaussian-splat scene import using Spark, so a generated amusement-park scan can be loaded as visual scenery without bundling a large binary into the repository.
-- Save/Load includes both blocks and track points.
-- GitHub Actions build check and GitHub Pages deployment workflow.
+- Responsive mobile-first dark interface and a Three.js 3D workspace.
+- Place cubes, spheres, and pyramids; choose colors; use Build, Move, and Delete modes.
+- Touch controls remain available even when the camera or hand model cannot start.
+- Undo/Redo, local Save/Load, and clear workspace for blocks and coaster track edits.
+- Camera preview and MediaPipe Hand Landmarker integration for one or two hands, with GPU inference attempted first and CPU fallback.
+- Pinch hysteresis and fingertip smoothing to reduce jitter; primary-hand selection follows the fingertip nearest the previous frame to reduce jumps when two hands are visible.
+- In Move mode, pinch near a block to grab it, move the pinched hand to reposition it on a half-unit grid, and open the fingers to release it.
+- Coaster track drawing with two parallel rails, cross-ties, and evenly spaced support pillars.
+- Optional local `.spz` Gaussian-splat scene import via Spark, loaded on demand instead of bundling a scene asset.
 
 ## Run locally
 
@@ -34,19 +30,34 @@ npm run build
 npm run preview
 ```
 
+GitHub Actions runs `npm run build` on pushes to `main` and pull requests targeting `main`.
+
+## Enable the hosted preview
+
+The GitHub Pages deployment workflow is in `.github/workflows/deploy-pages.yml`. The repository owner must enable Pages once:
+
+1. Open the repository **Settings → Pages**.
+2. Under **Build and deployment**, set **Source** to **GitHub Actions**.
+3. Return to **Actions** and confirm the latest **Deploy BlockAR Studio to GitHub Pages** run succeeds.
+
+The intended project-site URL is:
+
+`https://animebyshivamsarraf-hub.github.io/blockar-studio-v2/`
+
+The URL only becomes available after Pages is enabled and the deployment workflow succeeds.
+
 ## Important limitations
 
-- Hand tracking requires camera permission, HTTPS (or localhost), and network access to load the MediaPipe model/WASM files.
-- Imported `.spz` scenery is a visual Gaussian-splat environment, not editable coaster geometry or a room-depth map. The user must select the asset from the device; the binary is not included in the Git repository.
-- The current camera view is a camera-backed 3D overlay, **not yet calibrated/world-locked AR**. Objects are placed on a virtual floor, not anchored to real surfaces.
-- Coaster track editing is a first version: it creates a curved rail and supports, but there is no train, collision physics, or ride preview yet.
-- A GitHub Actions build and physical-device test must pass before calling the app verified.
-- The Pages workflow is committed, but its deployment has not yet been confirmed.
+- Camera access requires HTTPS (or localhost), browser camera permission, and network access for the MediaPipe model and WASM files.
+- The camera-backed 3D overlay is **not yet calibrated or world-locked AR**. Blocks and coaster rails sit on a virtual floor, not surfaces detected in the real room.
+- Coaster track height is currently generated procedurally from the order of track points; manual height controls, a coaster train, ride physics, and ride preview are not implemented yet.
+- Imported `.spz` scenery is visual Gaussian-splat content, not editable coaster geometry or a room-depth map. The user must select the asset on the device; no scene binary is included in this repository.
+- A green CI build does not prove camera/hand tracking works on every phone. Physical Android browser testing is still required.
+- GitHub Pages deployment has not succeeded until the repository Pages setting above is enabled and a deployment run passes.
 
-## Roadmap
+## Next steps
 
-1. Confirm the production build and deployment workflow.
-2. Continue the hand-system foundation: validate cursor/video crop mapping on real Android devices, validate stable primary-hand selection and add richer gesture states, then implement true grab-and-drag (the current pinch action places objects; it does not yet drag them).
-3. Add coaster editing (undo, remove last point, track height/shape controls) and ride preview.
-4. Add WebXR hit testing for supported phones/browsers.
-5. Test on real Android devices and fix issues reported by the browser.
+1. Enable Pages and verify the deployed site loads from the project URL.
+2. Test hand cursor alignment, pinch and grab/drag on a real Android phone; fix any reported device-specific problems.
+3. Add coaster point deletion and manual height/shape controls, then a ride preview and physics.
+4. Add WebXR hit testing and world anchors for supported browsers and devices.
