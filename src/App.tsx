@@ -114,40 +114,7 @@ export default function App() {
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
-    for (const obj of trackObjectsRef.current) {
-      scene.remove(obj);
-      obj.traverse(node => {
-        if (node instanceof THREE.Mesh) {
-          node.geometry.dispose();
-          const material = node.material;
-          if (Array.isArray(material)) material.forEach(item => item.dispose());
-          else material.dispose();
-        }
-      });
-    }
-    trackObjectsRef.current = [];
-    if (trackPoints.length < 2) return;
-    const pathPoints = trackPoints.map((point, index) => new THREE.Vector3(point.x, 0.42 + Math.sin(index * 1.1) * 0.55 + index * 0.035, point.z));
-    const curve = new THREE.CatmullRomCurve3(pathPoints);
-    const rail = new THREE.Mesh(
-      new THREE.TubeGeometry(curve, Math.max(48, trackPoints.length * 16), 0.075, 8, false),
-      new THREE.MeshStandardMaterial({ color: "#7dd3fc", emissive: "#0c4a6e", emissiveIntensity: 0.55, metalness: 0.45, roughness: 0.28 })
-    );
-    rail.castShadow = true;
-    scene.add(rail);
-    trackObjectsRef.current.push(rail);
-    pathPoints.forEach(point => {
-      const supportHeight = Math.max(0.08, point.y);
-      const support = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.035, 0.05, supportHeight, 8),
-        new THREE.MeshStandardMaterial({ color: "#94a3b8", metalness: 0.35, roughness: 0.5 })
-      );
-      support.position.set(point.x, supportHeight / 2 - 0.035, point.z);
-      support.castShadow = true;
-      scene.add(support);
-      trackObjectsRef.current.push(support);
-    });
-    return () => {
+    const disposeTrackObjects = () => {
       for (const obj of trackObjectsRef.current) {
         scene.remove(obj);
         obj.traverse(node => {
@@ -161,6 +128,66 @@ export default function App() {
       }
       trackObjectsRef.current = [];
     };
+    disposeTrackObjects();
+    if (trackPoints.length < 2) return;
+
+    // Keep the rail above the virtual floor, then sample its curve for smooth,
+    // parallel rails and evenly spaced cross-ties/supports.
+    const pathPoints = trackPoints.map((point, index) => new THREE.Vector3(
+      point.x,
+      Math.max(0.28, 0.55 + Math.sin(index * 0.8) * 0.32 + Math.min(index, 12) * 0.025),
+      point.z
+    ));
+    const curve = new THREE.CatmullRomCurve3(pathPoints, false, "centripetal", 0.5);
+    const segments = Math.max(64, trackPoints.length * 24);
+    const samples = Array.from({ length: segments + 1 }, (_, index) => {
+      const t = index / segments;
+      const point = curve.getPoint(t);
+      const tangent = curve.getTangent(t).normalize();
+      const side = new THREE.Vector3(tangent.z, 0, -tangent.x).normalize().multiplyScalar(0.17);
+      return { t, point, tangent, side };
+    });
+    const railMaterial = new THREE.MeshStandardMaterial({
+      color: "#7dd3fc", emissive: "#075985", emissiveIntensity: 0.65,
+      metalness: 0.48, roughness: 0.26
+    });
+    const leftRail = new THREE.Mesh(
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(samples.map(sample => sample.point.clone().add(sample.side)), false, "centripetal", 0.5), segments, 0.035, 8, false),
+      railMaterial
+    );
+    const rightRail = new THREE.Mesh(
+      new THREE.TubeGeometry(new THREE.CatmullRomCurve3(samples.map(sample => sample.point.clone().sub(sample.side)), false, "centripetal", 0.5), segments, 0.035, 8, false),
+      railMaterial.clone()
+    );
+    leftRail.castShadow = rightRail.castShadow = true;
+    scene.add(leftRail, rightRail);
+    trackObjectsRef.current.push(leftRail, rightRail);
+
+    const tieMaterial = new THREE.MeshStandardMaterial({ color: "#64748b", metalness: 0.25, roughness: 0.68 });
+    const tieStep = Math.max(4, Math.floor(segments / Math.max(8, trackPoints.length * 5)));
+    for (let i = 0; i <= segments; i += tieStep) {
+      const sample = samples[i];
+      const tie = new THREE.Mesh(new THREE.BoxGeometry(0.43, 0.055, 0.085), tieMaterial.clone());
+      tie.position.copy(sample.point);
+      tie.rotation.y = Math.atan2(sample.tangent.x, sample.tangent.z);
+      tie.castShadow = true;
+      scene.add(tie);
+      trackObjectsRef.current.push(tie);
+    }
+
+    const supportMaterial = new THREE.MeshStandardMaterial({ color: "#94a3b8", metalness: 0.35, roughness: 0.5 });
+    const supportCount = Math.min(10, Math.max(3, trackPoints.length * 2));
+    for (let i = 1; i < supportCount; i++) {
+      const sample = samples[Math.round((i / supportCount) * segments)];
+      const supportHeight = Math.max(0.08, sample.point.y + 0.04);
+      const support = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, supportHeight, 8), supportMaterial.clone());
+      support.position.set(sample.point.x, -0.04 + supportHeight / 2, sample.point.z);
+      support.castShadow = true;
+      scene.add(support);
+      trackObjectsRef.current.push(support);
+    }
+
+    return disposeTrackObjects;
   }, [trackPoints]);
 
   const loadParkSplat = async (event: ChangeEvent<HTMLInputElement>) => {
